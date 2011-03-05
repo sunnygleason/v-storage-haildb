@@ -11,13 +11,11 @@ public class HailDBStoreTest extends AbstractStorageEngineTest {
 	private HailDBStorageEngine engine = new HailDBStorageEngine(database,
 			"vtest");
 
-	@Override
 	protected void setUp() throws Exception {
 		super.setUp();
 		engine.truncate();
 	}
 
-	@Override
 	protected void tearDown() throws Exception {
 		super.tearDown();
 		engine.truncate();

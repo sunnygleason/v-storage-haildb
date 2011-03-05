@@ -14,6 +14,13 @@
       <scope>provided</scope>
     </dependency>
     <dependency>
+      <groupId>com.g414.voldemort</groupId>
+      <artifactId>v-storage-api</artifactId>
+      <version>0.8.2</version>
+      <type>test-jar</type>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>com.g414.haildb</groupId>
       <artifactId>g414-haildb</artifactId>
       <version>0.1.0</version>
