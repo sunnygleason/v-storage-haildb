@@ -11,6 +11,7 @@
       <groupId>com.g414.voldemort</groupId>
       <artifactId>v-storage-api</artifactId>
       <version>0.8.2</version>
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>com.g414.haildb</groupId>
