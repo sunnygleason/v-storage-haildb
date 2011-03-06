@@ -4,19 +4,27 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.g414.voldemort</groupId>
   <artifactId>v-storage-haildb</artifactId>
-  <version>0.8.2</version>
+  <version>0.90</version>
+
+  <repositories>
+    <repository>
+      <id>g414 Repository</id>
+      <url>http://mvn.g414.com/</url>
+      <layout>default</layout>
+    </repository>
+  </repositories>
 
   <dependencies>
     <dependency>
       <groupId>com.g414.voldemort</groupId>
       <artifactId>v-storage-api</artifactId>
-      <version>0.8.2</version>
+      <version>0.90</version>
       <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>com.g414.voldemort</groupId>
       <artifactId>v-storage-api</artifactId>
-      <version>0.8.2</version>
+      <version>0.90</version>
       <type>test-jar</type>
       <scope>test</scope>
     </dependency>
