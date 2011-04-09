@@ -1,4 +1,4 @@
-package voldemort.store.haildb;
+package voldemort.store.haildb2;
 
 /*
  * Copyright 2008-2009 LinkedIn, Inc
@@ -22,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import voldemort.VoldemortException;
@@ -45,6 +46,7 @@ import com.g414.haildb.Database;
 import com.g414.haildb.InnoException;
 import com.g414.haildb.TableBuilder;
 import com.g414.haildb.TableDef;
+import com.g414.haildb.TableType;
 import com.g414.haildb.Transaction;
 import com.g414.haildb.Transaction.TransactionLevel;
 import com.g414.haildb.Transaction.TransactionState;
@@ -59,6 +61,8 @@ import com.g414.haildb.tpl.Functional.Reduction;
 import com.g414.haildb.tpl.Functional.Target;
 import com.g414.haildb.tpl.Functional.Traversal;
 import com.g414.haildb.tpl.Functional.TraversalSpec;
+import com.g414.hash.LongHash;
+import com.g414.hash.impl.MurmurHash;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 
@@ -73,6 +77,8 @@ public class HailDBStorageEngine implements
     private final Database database;
     private final DatabaseTemplate dbt;
     private final TableDef def;
+    private final AtomicLong serial = new AtomicLong(0L);
+    private final LongHash hash = new MurmurHash();
 
     public HailDBStorageEngine(Database database, String name) {
         this.name = name;
@@ -81,14 +87,17 @@ public class HailDBStorageEngine implements
 
         TableBuilder builder = new TableBuilder(schema + "/" + name);
 
+        builder.addColumn("id_", ColumnType.INT, 8, ColumnAttribute.NOT_NULL);
+        builder.addColumn("key_hash_", ColumnType.INT, 8,
+                ColumnAttribute.NOT_NULL);
         builder.addColumn("key_", ColumnType.VARBINARY, 200,
                 ColumnAttribute.NOT_NULL);
         builder.addColumn("version_", ColumnType.VARBINARY, 200,
                 ColumnAttribute.NOT_NULL);
         builder.addColumn("value_", ColumnType.BLOB, 0);
 
-        builder.addIndex("PRIMARY", "key_", 0, true, true);
-        builder.addIndex("PRIMARY", "version_", 0, true, true);
+        builder.addIndex("PRIMARY", "id_", 0, true, true);
+        builder.addIndex("KEYHASH", "key_hash_", 0, false, false);
 
         this.def = builder.build();
 
@@ -107,7 +116,7 @@ public class HailDBStorageEngine implements
 
     public void create() {
         this.database.createDatabase(schema);
-        this.database.createTable(def);
+        this.database.createTable(def, TableType.DYNAMIC, 0);
     }
 
     public void truncate() {
@@ -177,18 +186,20 @@ public class HailDBStorageEngine implements
             throws PersistenceFailureException {
         StoreUtils.assertValidKey(key);
 
+        final long keyHash = hash.getLongHashCode(key.get());
         final Map<String, Object> primary = ImmutableMap.<String, Object> of(
-                "key_", key.get());
+                "key_hash_", keyHash);
 
         final Filter primaryFilter = new Filter() {
             public Boolean map(Map<String, Object> row) {
-                return Arrays.equals((byte[]) row.get("key_"), key.get());
+                return row.get("key_hash_").equals(keyHash);
             }
         };
 
         final Filter filter = new Filter() {
             public Boolean map(Map<String, Object> row) {
-                return Arrays.equals(key.get(), (byte[]) row.get("key_"))
+                return row.get("key_hash_").equals(keyHash)
+                        && Arrays.equals(key.get(), (byte[]) row.get("key_"))
                         && new VectorClock((byte[]) row.get("version_"))
                                 .compare(maxVersion).equals(Occured.BEFORE);
             }
@@ -210,13 +221,13 @@ public class HailDBStorageEngine implements
                         new TransactionCallback<Void>() {
                             @Override
                             public Void inTransaction(Transaction txn) {
-                                Functional
-                                        .apply(txn,
-                                                dbt,
-                                                new TraversalSpec(new Target(
-                                                        def), primary,
-                                                        primaryFilter, filter),
-                                                r).traverseAll();
+                                Functional.apply(
+                                        txn,
+                                        dbt,
+                                        new TraversalSpec(new Target(def,
+                                                "KEYHASH"), primary,
+                                                primaryFilter, filter), r)
+                                        .traverseAll();
 
                                 return null;
                             }
@@ -267,24 +278,35 @@ public class HailDBStorageEngine implements
 
         try {
             for (final ByteArray key : keys) {
+                final long keyHash = hash.getLongHashCode(key.get());
+
                 final Map<String, Object> primary = ImmutableMap
-                        .<String, Object> of("key_", key.get());
+                        .<String, Object> of("key_hash_", keyHash);
 
                 final Filter primaryFilter = new Filter() {
                     public Boolean map(Map<String, Object> row) {
-                        return row.get("key_").equals(key.get());
+                        return row.get("key_hash_").equals(keyHash);
+                    }
+                };
+
+                final Filter filter = new Filter() {
+                    public Boolean map(Map<String, Object> row) {
+                        return row.get("key_hash_").equals(keyHash)
+                                && Arrays.equals(key.get(),
+                                        (byte[]) row.get("key_"));
                     }
                 };
 
                 final List<Versioned<byte[]>> found = Lists.newArrayList();
-
                 dbt.inTransaction(TransactionLevel.READ_COMMITTED,
                         new TransactionCallback<Void>() {
                             @Override
                             public Void inTransaction(Transaction txn) {
                                 Functional.reduce(txn, new TraversalSpec(
-                                        new Target(def), primary,
-                                        primaryFilter, null), reduction, found);
+                                        new Target(def, "KEYHASH"), primary,
+                                        primaryFilter, filter), reduction,
+                                        found);
+
                                 return null;
                             }
                         });
@@ -314,12 +336,21 @@ public class HailDBStorageEngine implements
     public void put(final ByteArray key, final Versioned<byte[]> value,
             byte[] transformed) throws PersistenceFailureException {
         StoreUtils.assertValidKey(key);
+        final long keyHash = hash.getLongHashCode(key.get());
+
         final Map<String, Object> primary = ImmutableMap.<String, Object> of(
-                "key_", key.get());
+                "key_hash_", keyHash);
 
         final Filter primaryFilter = new Filter() {
             public Boolean map(Map<String, Object> row) {
-                return Arrays.equals((byte[]) row.get("key_"), key.get());
+                return row.get("key_hash_").equals(keyHash);
+            }
+        };
+
+        final Filter filter = new Filter() {
+            public Boolean map(Map<String, Object> row) {
+                return row.get("key_hash_").equals(keyHash)
+                        && Arrays.equals(key.get(), (byte[]) row.get("key_"));
             }
         };
 
@@ -357,21 +388,26 @@ public class HailDBStorageEngine implements
             }
         };
 
-        for (int retries = 0; retries < 20; retries++) {
+        boolean done = false;
+
+        for (int retries = 0; !done && retries < 20; retries++) {
             try {
-                dbt.inTransaction(TransactionLevel.REPEATABLE_READ,
+                dbt.inTransaction(TransactionLevel.READ_COMMITTED,
                         new TransactionCallback<Void>() {
                             @Override
                             public Void inTransaction(Transaction txn) {
                                 Functional.apply(
                                         txn,
                                         dbt,
-                                        new TraversalSpec(new Target(def),
-                                                primary, primaryFilter, null),
+                                        new TraversalSpec(new Target(def,
+                                                "KEYHASH"), primary,
+                                                primaryFilter, filter),
                                         mutation).traverseAll();
 
                                 if (!didUpdate.get()) {
                                     Map<String, Object> newRow = new LinkedHashMap<String, Object>();
+                                    newRow.put("id_", serial.getAndIncrement());
+                                    newRow.put("key_hash_", keyHash);
                                     newRow.put("key_", key.get());
                                     newRow.put("version_", ((VectorClock) value
                                             .getVersion()).toBytes());

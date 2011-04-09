@@ -4,7 +4,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.g414.voldemort</groupId>
   <artifactId>v-storage-haildb</artifactId>
-  <version>0.90</version>
+  <version>0.90.0</version>
 
   <repositories>
     <repository>
@@ -31,7 +31,12 @@
     <dependency>
       <groupId>com.g414.haildb</groupId>
       <artifactId>g414-haildb</artifactId>
-      <version>0.1.0</version>
+      <version>0.2.0</version>
+    </dependency>
+    <dependency>
+      <groupId>com.g414.hash</groupId>
+      <artifactId>g414-hash</artifactId>
+      <version>0.7.0</version>
     </dependency>
   </dependencies>
 

@@ -1,4 +1,4 @@
-package voldemort.store.haildb;
+package voldemort.store.haildb2;
 
 /*
  * Copyright 2008-2009 LinkedIn, Inc
